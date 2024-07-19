@@ -4,6 +4,7 @@ Created on Fri Jul 19 13:28:42 2024
 
 @author: Harry MullineauxSanders
 """
+#Set of functions to calculate the electronic structure of a spiral magnetic in face rotating at a constant frequency embedded into a s-wave superconductor
 
 import numpy as np
 import scipy.linalg as sl
