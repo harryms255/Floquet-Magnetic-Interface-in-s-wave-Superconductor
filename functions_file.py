@@ -101,34 +101,40 @@ def floquet_Hamiltonian(k,Hamiltonian,parameters,omega):
 
 
 
-#Greens Function---------------------------------------------------------------
 
-def poles(omega,kx,kf,m,km,Delta,B,sigma,pm):
-    p=np.sqrt(1-(kx+sigma*km)**2+pm*1j*np.sqrt(Delta**2-(omega+sigma*B)**2))
+
+
+#Continuum Greens Function---------------------------------------------------------------
+
+def poles(omega,kx,kf,km,Delta,B,sigma,pm):
+    p=np.sqrt(1-(kx+sigma*km)**2+pm*1j*np.emath.sqrt(Delta**2-(omega+sigma*B)**2))
     
     return p
 
-def sigma_substrate_Greens_function(omega,kx,y,kf,m,km,Delta,B,sigma):
+def sigma_substrate_Greens_function(omega,kx,y,kf,km,Delta,B,sigma):
+    #The greens function is written in units of m/kf so we ignore this factor out the front
     
-    omega+=0.000001j
+    omega=np.add(omega,0.000001j,casting="unsafe")
     
-    p_plus=poles(omega,kx,kf,m,km,Delta,B,sigma,1)
-    p_min=poles(omega,kx,kf,m,km,Delta,B,sigma,-1)
-    g_sigma=np.zeros((2,2),dtype=complex)
+    p1=poles(omega,kx,kf,km,Delta,B,sigma,1)
+    p2=poles(omega,kx,kf,km,Delta,B,sigma,-1)
     
-    g_sigma+=np.e**(1j*kf*p_plus*abs(y))/p_plus*np.array(([omega+sigma*B+kx**2+p_plus**2-1,sigma*Delta],[sigma*Delta,omega+sigma*B+1-kx**2-p_plus**2]))
+    e_plus=np.e**(1j*kf*p1*abs(y))/p1+np.e**(-1j*kf*p2*abs(y))/p2
+    e_min=np.e**(1j*kf*p1*abs(y))/p1-np.e**(-1j*kf*p2*abs(y))/p2
     
-    g_sigma+=np.e**(-1j*kf*p_min*abs(y))/p_min*np.array(([omega+sigma*B+kx**2+p_min**2-1,sigma*Delta],[sigma*Delta,omega+sigma*B+1-kx**2-p_min**2]))
+    tau_x=np.array(([0,1],[1,0]),dtype=complex)
+    tau_z=np.array(([1,0],[0,-1]),dtype=complex)
+    iden=np.identity(2)
     
-    g_sigma*=-1j*m/(2*kf*np.sqrt((omega+sigma*B)**2-Delta**2))
+    g_sigma=-1/(2*np.emath.sqrt(Delta**2-(omega+sigma*B)**2))*(e_plus*(omega+sigma*B)*iden+sigma*Delta*e_plus*tau_x+1j*e_min*np.emath.sqrt(Delta**2-(omega+sigma*B)**2)*tau_z)
     
     return g_sigma
 
-def substrate_Greens_function(omega,kx,y,kf,m,km,Delta,B):
+def substrate_Greens_function(omega,kx,y,kf,km,Delta,B):
     g=np.zeros((4,4),dtype=complex)
     
-    g_up=sigma_substrate_Greens_function(omega,kx,y,kf,m,km,Delta,B,1)
-    g_down=sigma_substrate_Greens_function(omega,kx,y,kf,m,km,Delta,B,-1)
+    g_up=sigma_substrate_Greens_function(omega,kx,y,kf,km,Delta,B,1)
+    g_down=sigma_substrate_Greens_function(omega,kx,y,kf,km,Delta,B,-1)
     
     g[0,0]=g_up[0,0]
     g[0,3]=g_up[0,1]
@@ -139,57 +145,162 @@ def substrate_Greens_function(omega,kx,y,kf,m,km,Delta,B):
     
     return g
 
-def T_matrix(omega,kx,kf,m,km,Delta,B,Vm,theta):
-    Hm=Vm*np.kron(np.array(([1,0],[0,-1])),np.array(([np.cos(theta),np.sin(theta)],[np.sin(theta),-np.cos(theta)])))
-    if Vm==0:
+def T_matrix(omega,kx,kf,km,Delta,B,Cm,theta):
+    Hm=Cm*np.kron(np.array(([1,0],[0,-1])),np.array(([np.cos(theta),np.sin(theta)],[np.sin(theta),-np.cos(theta)])))
+    if Cm==0:
         T=np.zeros((4,4))
     else:
         
-        T_inv=np.linalg.inv(Hm)-substrate_Greens_function(omega, kx, 0, kf, m, km, Delta, B)
+        T_inv=np.linalg.inv(Hm)-substrate_Greens_function(omega, kx, 0, kf, km, Delta, B)
         
         T=np.linalg.inv(T_inv)
     
     return T
 
-def Greens_function(omega,kx,y1,y2,kf,m,km,Delta,B,Vm,theta):
+def Greens_function(omega,kx,y1,y2,kf,km,Delta,B,Cm,theta):
     
-    g_y1y2=substrate_Greens_function(omega, kx, y1-y2, kf, m, km, Delta, B)
-    g_y1=substrate_Greens_function(omega, kx, y1, kf, m, km, Delta, B)
-    g_y2=substrate_Greens_function(omega, kx, -y2, kf, m, km, Delta, B)
-    T=T_matrix(omega, kx, kf, m, km, Delta, B, Vm, theta)
+    g_y1y2=substrate_Greens_function(omega,kx,y1-y2,kf,km,Delta,B)
+    g_y1=substrate_Greens_function(omega,kx,y1,kf,km,Delta,B)
+    g_y2=substrate_Greens_function(omega,kx,-y2,kf,km,Delta,B)
+    T=T_matrix(omega,kx,kf,km,Delta,B,Cm,theta)
     
     G=g_y1y2+g_y1@T@g_y2
     
     return G
 
-#Electronic Structure----------------------------------------------------------
 
-def LDOS(omega,kx,y,kf,m,km,Delta,B,Vm,theta):
-    G=Greens_function(omega,kx,y,y,kf,m,km,Delta,B,Vm,theta)
+
+
+
+
+
+
+
+#Tight Binding Green's Function------------------------------------------------
+
+def pole_location(mu,omega,Delta,B,pm1,pm2):
+    a=1/2*(mu-pm1*np.emath.sqrt(omega**2-Delta**2))
+    
+    # if omega==0:
+    #     a=1/2*(-mu+pm1*1j*abs(Delta))
+    
+    return -a+pm2*np.emath.sqrt(a**2-1)
+
+def sigma_analytic_GF(omega,y,kx,t,mu,Delta,km,B,sigma):
+    omega=np.add(omega,0.000001j,casting="unsafe")
+    mu_kx=mu+2*t*np.cos(kx+sigma*km)
+    z1=pole_location(mu_kx,omega,Delta,B,1,-1)
+    z2=pole_location(mu_kx,omega,Delta,B,-1,-1)
+    z3=pole_location(mu_kx,omega,Delta,B,1,1)
+    z4=pole_location(mu_kx,omega,Delta,B,-1,1)
+    
+    poles=[z1,z2,z3,z4]
+    
+    GF=np.zeros((2,2),dtype=complex)
+    
+    for z in poles:
+        if abs(z)<1:
+            
+            denominator=1
+            for x in poles:
+                if x !=z:
+                    denominator*=(z-x)
+            GF+=z**(abs(y))/denominator*np.array(([(omega-mu_kx)*z-t*(z**2+1),z*Delta*sigma],[z*Delta*sigma,(omega+mu_kx)*z+t*(z**2+1)]))
+            
+    return -GF/t**2
+
+def analytic_SC_GF(omega,y,kx,t,mu,Delta,km):
+    
+    GF_up=sigma_analytic_GF(omega,y,kx,t,mu,Delta,km,1)
+    GF_down=sigma_analytic_GF(omega,y,kx,t,mu,Delta,km,-1)
+    
+    GF=np.zeros((4,4),dtype=complex)
+    GF[0,0]=GF_up[0,0]
+    GF[0,3]=GF_up[0,1]
+    GF[3,0]=GF_up[1,0]
+    GF[3,3]=GF_up[1,1]
+    
+    GF[1:3,1:3]=GF_down
+    
+    return GF
+
+def analytic_t_matrix(omega,kx,t,mu,Delta,km,Vm):
+    g=analytic_SC_GF(omega,kx, t, mu, Delta, km)
+
+    
+    tau_z=np.array(([1,0],[0,-1]))
+    sigma_x=np.array(([0,1],[1,0]))
+    
+    if Vm==0:
+        T=np.zeros((4,4))
+    if Vm!=0:
+        T=np.linalg.inv(np.linalg.inv(Vm*np.kron(tau_z,sigma_x))-g)
+    
+    return T
+
+
+def analytic_GF(omega,kx,y1,y2,t,mu,Delta,km,Vm):
+    g_y1_y2=analytic_SC_GF(omega,abs(y1-y2),kx,t,mu,Delta,km)
+    g_y1=analytic_SC_GF(omega,y1,kx,t,mu,Delta,km)
+    g_y2=analytic_SC_GF(omega,-y2,kx,t,mu,Delta,km)
+    g_0=analytic_SC_GF(omega,0,kx,t,mu,Delta,km)
+     
+    tau_z=np.array(([1,0],[0,-1]))
+    sigma_x=np.array(([0,1],[1,0]))
+    
+    if Vm==0:
+        T=np.zeros((4,4))
+    if Vm!=0:
+        T=np.linalg.inv(np.linalg.inv(Vm*np.kron(tau_z,sigma_x))-g_0)
+        
+    GF=g_y1_y2+g_y1@T@g_y2
+    
+    return GF
+
+
+
+
+
+
+
+
+
+
+#Continuum Electronic Structure----------------------------------------------------------
+
+def LDOS(omega,kx,y,kf,km,Delta,B,Cm,theta):
+    G=Greens_function(omega,kx,y,y,kf,km,Delta,B,Cm,theta)
     
     LDOS=-1/np.pi*np.imag(np.trace(G))
     
     return LDOS
 
-def DOS(omega,kx,y,kf,m,km,Delta,B,Vm,theta):
+def DOS(omega,kx,kf,km,Delta,B,Cm,theta):
     
     y_values=np.linspace(-50/kf,50/kf,10001)
     
     DOS=0
     for y in y_values:
-        DOS+=LDOS(omega, kx, y, kf, m, km, Delta, B, Vm, theta)
+        DOS+=LDOS(omega, kx, y, kf, km, Delta, B, Cm, theta)
         
     return DOS
 
-def in_gap_band_structure(kx,kf,m,km,Delta,B,Vm,theta):
+def in_gap_band_structure(kx,kf,km,Delta,B,Cm,theta):
     effective_gap=abs(Delta)-abs(B)
     
-    pole_condition=lambda omega:1/np.linalg.det(T_matrix(omega, kx, kf, m, km, Delta, B, Vm, theta))
+    pole_condition=lambda omega:np.linalg.det(np.linalg.inv(T_matrix(omega,kx,kf,km,Delta,B,Cm,theta)))
     
-    positive_energy_mode=fsolve(pole_condition,x0=0.9*effective_gap)
-    negative_enery_mode=fsolve(pole_condition,x0=-0.9*effective_gap)
+    positive_energy_mode=fsolve(pole_condition,x0=0.99*effective_gap)
+    negative_enery_mode=fsolve(pole_condition,x0=-0.99*effective_gap)
     
-    return negative_enery_mode,positive_energy_mode
+    return negative_enery_mode[0],positive_energy_mode[0]
+    
+    
+    
+    
+    
+    
+    
     
     
     
@@ -199,16 +310,21 @@ def in_gap_band_structure(kx,kf,m,km,Delta,B,Vm,theta):
     
     
     
-def pfaffian_invariant(Hamiltonian,parameters,system_size):
+def pfaffian_invariant(Hamiltonian,parameters,system_size,TB=True):
     H=lambda k:Hamiltonian(H,*parameters)
     
     U=np.kron(np.array(([1,-1j],[1,1j])),np.identity(2))
     U_tot=np.kron(np.identity(system_size),U)
     
-    H_majorana_0=np.conj(U_tot.T)@H(0)@U_tot
-    H_majorana_pi=np.conj(U_tot.T)@H(np.pi)@U_tot
-    
-    invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)*pf.pfaffian(H_majorana_pi)))
+    if TB==True:
+        H_majorana_0=np.conj(U_tot.T)@H(0)@U_tot
+        H_majorana_pi=np.conj(U_tot.T)@H(np.pi)@U_tot
+        
+        invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)*pf.pfaffian(H_majorana_pi)))
+    if TB==False:
+        H_majorana_0=np.conj(U_tot.T)@H(0)@U_tot
+        
+        invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)))
     
     return invariant
 
