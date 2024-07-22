@@ -15,7 +15,7 @@ B=0
 Cm=Delta**(1/2)
 B_values=np.linspace(0,Delta,11)
 Cm_values=np.linspace(0,1.5,21)
-theta=np.pi/2*0
+theta=np.pi/2
 y=0
 
 for B in tqdm(B_values):
