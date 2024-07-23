@@ -9,16 +9,16 @@ from functions_file import *
 plt.close("all")
 
 kf=0.65
-km=kf
+km=1
 Delta=0.1
-B=0.1*Delta*0
+B=0*Delta
 Cm=Delta**(1/2)
-theta=np.pi*0
+theta=np.pi/2
 
 if __name__ == "__main__":
 
-    cbar=[plt.cm.plasma(x) for x in np.linspace(0,1,6)]
-    Cm_values=np.linspace(0.1,1,6)
+    cbar=[plt.cm.inferno(x) for x in np.linspace(0,1,6)]
+    Cm_values=np.linspace(0.1,1,6)*continuum_phase_boundaries(kf, km, Delta, B, theta, 1)
     plt.figure()
     for Cm_indx,Cm in enumerate(tqdm(Cm_values)):
     

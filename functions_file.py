@@ -4,7 +4,46 @@ Created on Fri Jul 19 13:28:42 2024
 
 @author: Harry MullineauxSanders
 """
-#Set of functions to calculate the electronic structure of a spiral magnetic in face rotating at a constant frequency embedded into a s-wave superconductor
+
+"""
+Set of functions to calculate the electronic structure of a spiral magnetic in face rotating at a constant frequency embedded into a s-wave superconductor
+
+Parameters used in functions
+
+Continuum Model
+
+omega: Float, energy in Green's function
+kx: Float, momentum along the interface, in units of kf
+kf: Float, fermi momentum
+km: Float, spiral pitch of interface, in units of kf
+Delta: Float, superconductor pairing, should be real
+B: Float, effective zeeman field, should be less than Delta for a gapped system
+sigma: +-1, index for the spin sectors
+Cm: Float, unitless magnetic scattering
+theta: Float between -pi and pi, out of plane angle of the spiral
+
+Tight Binding Model
+
+omega: Float, energy in Green's function
+kx: Float between -pi and pi, momentum along the interface
+t: Float, bandwidth, set to 1 to make everything unitless
+mu: Float, chemical potential, in units of t
+km: Float between - pi and pi, spiral pitch of interface
+Delta: Float, superconductor pairing, should be real, in units of t
+B: Float, effective zeeman field, should be less than Delta for a gapped system, in units of t
+sigma: +-1, index for the spin sectors
+Vm: Float, magnetic scattering, in units of t
+theta: Float between -pi and pi, out of plane angle of the spiral
+
+
+Function notes:
+    
+Any Greens function will always have its first 2 parameters be omega and kx
+Any Hamiltonian will always have its first paremeter be kx
+
+
+"""
+
 
 import numpy as np
 import scipy.linalg as sl
@@ -13,6 +52,11 @@ from scipy.optimize import fsolve
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
+
+plt.rc('font', family='serif')
+plt.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}\usepackage{amssymb}'
+plt.rc('text', usetex=True)
+plt.rcParams.update({'font.size': 30})
 
 
 #Tight Binding-----------------------------------------------------------------
@@ -176,6 +220,8 @@ def Greens_function(omega,kx,y1,y2,kf,km,Delta,B,Cm,theta):
 
 
 
+
+
 #Tight Binding Green's Function------------------------------------------------
 
 def pole_location(mu,omega,Delta,B,pm1,pm2):
@@ -187,7 +233,7 @@ def pole_location(mu,omega,Delta,B,pm1,pm2):
     return -a+pm2*np.emath.sqrt(a**2-1)
 
 def sigma_analytic_GF(omega,y,kx,t,mu,Delta,km,B,sigma):
-    omega=np.add(omega,0.000001j,casting="unsafe")
+    omega=np.add(omega,0.0000001j,casting="unsafe")
     mu_kx=mu+2*t*np.cos(kx+sigma*km)
     z1=pole_location(mu_kx,omega,Delta,B,1,-1)
     z2=pole_location(mu_kx,omega,Delta,B,-1,-1)
@@ -296,8 +342,14 @@ def in_gap_band_structure(kx,kf,km,Delta,B,Cm,theta):
     return negative_enery_mode[0],positive_energy_mode[0]
     
     
-    
-    
+def gapless(kf,km,Delta,B,Cm,theta):
+    kx_values=np.linspace(-10,10,251)
+    zero_energy_DOS=0
+    for kx in kx_values:
+        zero_energy_DOS+=LDOS(0, kx, 0, kf, km, Delta, B, Cm, theta)
+        
+    return zero_energy_DOS/len(kx_values)
+  
     
     
     
@@ -307,26 +359,66 @@ def in_gap_band_structure(kx,kf,km,Delta,B,Cm,theta):
     
     
 #Topological Properties--------------------------------------------------------    
+
+
+def continuum_topological_Hamiltonian(kx,kf,km,Delta,B,Cm,theta):
+    top_ham=-Greens_function(0,kx,0,0,kf,km,Delta,B,Cm,theta)
     
+    top_ham+np.conj(top_ham.T)
+    return top_ham/2
     
+
+
+
+
+
+def continuum_phase_boundaries(kf,km,Delta,B,theta,pm):
+    p1=poles(0,0,kf,km,Delta,B,1,1)
+    p2=poles(0,0,kf,km,Delta,B,1,-1)
     
+    e_plus=1/p1+1/p2
+    e_min=1/p1-1/p2
+    
+    g_11=-1j*e_min/2
+    g_12=-e_plus*Delta/(2*np.emath.sqrt(Delta**2-B**2))
+    g_B=-B*e_plus/(2*np.emath.sqrt(Delta**2-B**2))
+    
+    Cm=np.real(1/(g_B*np.cos(theta)+pm*np.emath.sqrt(g_B**2*np.cos(theta)+g_11**2+g_12**2-g_B**2)))
+    
+    return Cm  
+def continuum_phase_boundaries_numpy(kf,km,Delta,B,Cm,theta,pm):
+    p1=poles(0,0,kf,km,Delta,B,1,1)
+    p2=poles(0,0,kf,km,Delta,B,1,-1)
+    
+    e_plus=1/p1+1/p2
+    e_min=1/p1-1/p2
+    
+    g_11=-1j*e_min/2
+    g_12=-e_plus*Delta/(2*np.emath.sqrt(Delta**2-B**2))
+    g_B=-B*e_plus/(2*np.emath.sqrt(Delta**2-B**2))
+    
+    return Cm-np.real(1/(g_B*np.cos(theta)+pm*np.emath.sqrt(g_B**2*np.cos(theta)+g_11**2+g_12**2-g_B**2)))
+  
 def pfaffian_invariant(Hamiltonian,parameters,system_size,TB=True):
-    H=lambda k:Hamiltonian(H,*parameters)
-    
-    U=np.kron(np.array(([1,-1j],[1,1j])),np.identity(2))
-    U_tot=np.kron(np.identity(system_size),U)
-    
-    if TB==True:
-        H_majorana_0=np.conj(U_tot.T)@H(0)@U_tot
-        H_majorana_pi=np.conj(U_tot.T)@H(np.pi)@U_tot
+    try:
+        H=lambda k:Hamiltonian(k,*parameters)
         
-        invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)*pf.pfaffian(H_majorana_pi)))
-    if TB==False:
-        H_majorana_0=np.conj(U_tot.T)@H(0)@U_tot
+        U=np.kron(np.array(([1,-1j],[1,1j])),np.identity(2))
+        U_tot=np.kron(np.identity(system_size),U)
         
-        invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)))
-    
-    return invariant
+        if TB==True:
+            H_majorana_0=(np.conj(U_tot.T)@H(0)@U_tot+np.conj((np.conj(U_tot.T)@H(0)@U_tot).T))/2
+            H_majorana_pi=np.conj(U_tot.T)@H(np.pi)@U_tot
+            
+            invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)*pf.pfaffian(H_majorana_pi)))
+        if TB==False:
+            H_majorana_0=np.round((np.conj(U_tot.T)@H(0)@U_tot+np.conj((np.conj(U_tot.T)@H(0)@U_tot).T))/2,decimals=5)
+            
+            invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)))
+    except AssertionError:
+        invariant=0
+        
+    return invariant,np.real(pf.pfaffian(H_majorana_0))
 
     
     
