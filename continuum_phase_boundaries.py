@@ -9,7 +9,7 @@ from functions_file import *
 plt.close("all")
 kf=0.65
 Delta=0.1
-B=Delta*0
+B=Delta*0.9
 theta=np.pi/2
 
 km_values=np.linspace(0,2,101)
@@ -25,4 +25,3 @@ plt.plot(km_values,Cm_1)
 plt.plot(km_values,Cm_2)
 plt.xlabel("$k_m/k_F$")
 #plt.xlabel(r"$\theta/\pi$")
-plt.ylabel(r"$C_m$")

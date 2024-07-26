@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 Set of functions to calculate the electronic structure of a spiral magnetic in face rotating at a constant frequency embedded into a s-wave superconductor
 
 Parameters used in functions
@@ -31,4 +32,3 @@ theta: Float between -pi and pi, out of plane angle of the spiral
 Function notes:
     
 Any Greens function will always have its first 2 parameters be omega and kx
-Any Hamiltonian will always have its first paremeter be kx

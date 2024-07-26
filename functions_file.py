@@ -60,7 +60,7 @@ plt.rcParams.update({'font.size': 30})
 
 
 #Tight Binding-----------------------------------------------------------------
-def kx_tight_binding_Hamiltonian(k,T,Ny,t,mu,Delta,Vm,km,omega):
+def driven_tight_binding_Hamiltonian(kx,T,Ny,t,mu,Delta,Vm,km,omega):
     """
     Tight Binding Hamiltonian of a 2D s-wave superconductor with a chain of magnetic 
     moments at y=Ny//2, spiralling in the xy plane with wavevector km
@@ -70,7 +70,7 @@ def kx_tight_binding_Hamiltonian(k,T,Ny,t,mu,Delta,Vm,km,omega):
 
     Parameters
     ----------
-    k : float in [a,a+2pi] for some float a
+    kx : float in [a,a+2pi] for some float a
         Momentum along x direction. Between -pi and pi mod(2pi)
     Ny : Integer
         System size in non-translationally invariant direction
@@ -124,10 +124,10 @@ def kx_tight_binding_Hamiltonian(k,T,Ny,t,mu,Delta,Vm,km,omega):
     
     #Onsite terms
     for y in range(Ny):
-        H[4*y,4*y]=-2*t*np.cos(k+km)-mu
-        H[4*y+1,4*y+1]=-2*t*np.cos(k-km)-mu
-        H[4*y+2,4*y+2]=2*t*np.cos(-k+km)+mu
-        H[4*y+3,4*y+3]=2*t*np.cos(-k-km)+mu
+        H[4*y,4*y]=-2*t*np.cos(kx+km)-mu
+        H[4*y+1,4*y+1]=-2*t*np.cos(kx-km)-mu
+        H[4*y+2,4*y+2]=2*t*np.cos(-kx+km)+mu
+        H[4*y+3,4*y+3]=2*t*np.cos(-kx-km)+mu
     
     return H
 
@@ -142,6 +142,83 @@ def floquet_Hamiltonian(k,Hamiltonian,parameters,omega):
     U=lambda k:sl.expm(1j*H_eff(k)*period)
     
     return -1j*period*sl.logm(U(k))
+
+def static_tight_binding_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta):
+    """
+    Tight Binding Hamiltonian of a 2D s-wave superconductor with a chain of magnetic 
+    moments at y=Ny//2, spiralling in the xy plane with wavevector km
+    
+    The chosen basis is spin x nambu x space so the ordering is 
+    (y1- particle-upspin, y1-particle-downspin,y1- hole-upspin, y1-hole-downspin,y2- particle-upspin, y2-particle-downspin,y2- hole-upspin, y2-hole-downspin)
+
+    Parameters
+    ----------
+    k : float in [a,a+2pi] for some float a
+        Momentum along x direction. Between -pi and pi mod(2pi)
+    Ny : Integer
+        System size in non-translationally invariant direction
+    t : float
+        Hopping integral in the x and y direction, generically set to 1
+    mu : float
+        Chemical potentiel
+    Delta : array of floats
+        S-Wave Superconductor pairing at each y site
+    Vm : Float
+        Magnetic scattering strength
+    km : float in [0,2pi]
+        Wavevector of spiral of magnetic moments.
+
+    Returns
+    -------
+    H: Float64 Numpy Array
+        Matrix representation of Bloch Hamiltonian
+
+    """
+
+    H=np.zeros((4*Ny,4*Ny),dtype=float)
+    
+    #y hopping terms
+    for y in range(Ny):
+        #up spin particle
+        H[4*y,4*((y+1)%Ny)]=-t
+        #down spin particle
+        H[4*y+1,4*((y+1)%Ny)+1]=-t
+        #up spin hole
+        H[4*y+2,4*((y+1)%Ny)+2]=t
+        #down spin hole
+        H[4*y+3,4*((y+1)%Ny)+3]=t
+        
+        
+    #S-Wave Pairing Terms
+    for y in range(Ny):
+        H[4*y,4*y+3]=Delta
+        H[4*y+1,4*y+2]=-Delta
+        #H[4*y+1,4*y+2]=-Delta[y]
+    
+    #Magnetic Scattering Terms
+    
+    y=Ny//2
+    
+    H[4*y,4*y+1]=Vm*np.sin(theta)
+    H[4*y+2,4*y+3]=-Vm*np.sin(theta)
+    
+    #Hamiltonian is made Hermitian
+    H+=np.matrix.getH(H)
+    
+    #Onsite terms
+    for y in range(Ny):
+        H[4*y,4*y]=-2*t*np.cos(kx+km)-mu-B
+        H[4*y+1,4*y+1]=-2*t*np.cos(kx-km)-mu+B
+        H[4*y+2,4*y+2]=2*t*np.cos(-kx+km)+mu+B
+        H[4*y+3,4*y+3]=2*t*np.cos(-kx-km)+mu-B
+    
+    y=Ny//2
+    H[4*y,4*y]+=Vm*np.cos(theta)
+    H[4*y+1,4*y+1]+=-Vm*np.cos(theta)
+    H[4*y+2,4*y+2]+=-Vm*np.cos(theta)
+    H[4*y+3,4*y+3]+=Vm*np.cos(theta)
+    
+    return H
 
 
 
@@ -158,7 +235,7 @@ def poles(omega,kx,kf,km,Delta,B,sigma,pm):
 def sigma_substrate_Greens_function(omega,kx,y,kf,km,Delta,B,sigma):
     #The greens function is written in units of m/kf so we ignore this factor out the front
     
-    omega=np.add(omega,0.000001j,casting="unsafe")
+    omega=np.add(omega,0.0001j,casting="unsafe")
     
     p1=poles(omega,kx,kf,km,Delta,B,sigma,1)
     p2=poles(omega,kx,kf,km,Delta,B,sigma,-1)
@@ -224,41 +301,40 @@ def Greens_function(omega,kx,y1,y2,kf,km,Delta,B,Cm,theta):
 
 #Tight Binding Green's Function------------------------------------------------
 
-def pole_location(mu,omega,Delta,B,pm1,pm2):
-    a=1/2*(mu-pm1*np.emath.sqrt(omega**2-Delta**2))
+def tight_binding_poles(omega,mu,Delta,B,sigma,pm1,pm2):
+    #omega=np.add(omega,0.0001j,casting="unsafe")
+    a=1/2*(mu-pm1*np.emath.sqrt((omega+sigma*B)**2-Delta**2))
     
     # if omega==0:
     #     a=1/2*(-mu+pm1*1j*abs(Delta))
     
     return -a+pm2*np.emath.sqrt(a**2-1)
 
-def sigma_analytic_GF(omega,y,kx,t,mu,Delta,km,B,sigma):
-    omega=np.add(omega,0.0000001j,casting="unsafe")
+def sigma_TB_GF(omega,y,kx,t,mu,Delta,km,B,sigma):
+    #omega=np.add(omega,0.00000001j,casting="unsafe")
     mu_kx=mu+2*t*np.cos(kx+sigma*km)
-    z1=pole_location(mu_kx,omega,Delta,B,1,-1)
-    z2=pole_location(mu_kx,omega,Delta,B,-1,-1)
-    z3=pole_location(mu_kx,omega,Delta,B,1,1)
-    z4=pole_location(mu_kx,omega,Delta,B,-1,1)
+    z1=tight_binding_poles(omega,mu_kx,Delta,B,sigma,1,-1)
+    z2=tight_binding_poles(omega,mu_kx,Delta,B,sigma,-1,-1)
+    z3=tight_binding_poles(omega,mu_kx,Delta,B,sigma,1,1)
+    z4=tight_binding_poles(omega,mu_kx,Delta,B,sigma,-1,1)
     
-    poles=[z1,z2,z3,z4]
+    tau_x=np.array(([0,1],[1,0]),dtype=complex)
+    tau_z=np.array(([1,0],[0,-1]),dtype=complex)
+    iden=np.identity(2)
     
-    GF=np.zeros((2,2),dtype=complex)
+    xi_plus=z1**(abs(y)+1)/((z1-z3)*(z1-z4))+z2**(abs(y)+1)/((z2-z3)*(z2-z4))
+    xi_min=z1**(abs(y)+1)/((z1-z3)*(z1-z4))-z2**(abs(y)+1)/((z2-z3)*(z2-z4))
     
-    for z in poles:
-        if abs(z)<1:
+    
+    
+    GF=xi_min*((omega+sigma*B)*iden+sigma*Delta*tau_x)-1j*xi_plus*np.sqrt(Delta**2-(omega+sigma*B)**2)*tau_z
             
-            denominator=1
-            for x in poles:
-                if x !=z:
-                    denominator*=(z-x)
-            GF+=z**(abs(y))/denominator*np.array(([(omega-mu_kx)*z-t*(z**2+1),z*Delta*sigma],[z*Delta*sigma,(omega+mu_kx)*z+t*(z**2+1)]))
-            
-    return -GF/t**2
+    return -GF/(t*(z1-z2))
 
-def analytic_SC_GF(omega,y,kx,t,mu,Delta,km):
+def TB_SC_GF(omega,y,kx,t,mu,Delta,km,B):
     
-    GF_up=sigma_analytic_GF(omega,y,kx,t,mu,Delta,km,1)
-    GF_down=sigma_analytic_GF(omega,y,kx,t,mu,Delta,km,-1)
+    GF_up=sigma_TB_GF(omega,y,kx,t,mu,Delta,km,B,1)
+    GF_down=sigma_TB_GF(omega,y,kx,t,mu,Delta,km,B,-1)
     
     GF=np.zeros((4,4),dtype=complex)
     GF[0,0]=GF_up[0,0]
@@ -270,34 +346,27 @@ def analytic_SC_GF(omega,y,kx,t,mu,Delta,km):
     
     return GF
 
-def analytic_t_matrix(omega,kx,t,mu,Delta,km,Vm):
-    g=analytic_SC_GF(omega,kx, t, mu, Delta, km)
+def TB_T_matrix(omega,kx,t,mu,Delta,km,B,Vm,theta):
+    g=TB_SC_GF(omega,0,kx, t, mu, Delta, km,B)
 
     
     tau_z=np.array(([1,0],[0,-1]))
-    sigma_x=np.array(([0,1],[1,0]))
+    hm=np.array(([np.cos(theta),np.sin(theta)],[np.sin(theta),-np.cos(theta)]))
     
     if Vm==0:
         T=np.zeros((4,4))
     if Vm!=0:
-        T=np.linalg.inv(np.linalg.inv(Vm*np.kron(tau_z,sigma_x))-g)
+        T=np.linalg.inv(np.linalg.inv(Vm*np.kron(tau_z,hm))-g)
     
     return T
 
 
-def analytic_GF(omega,kx,y1,y2,t,mu,Delta,km,Vm):
-    g_y1_y2=analytic_SC_GF(omega,abs(y1-y2),kx,t,mu,Delta,km)
-    g_y1=analytic_SC_GF(omega,y1,kx,t,mu,Delta,km)
-    g_y2=analytic_SC_GF(omega,-y2,kx,t,mu,Delta,km)
-    g_0=analytic_SC_GF(omega,0,kx,t,mu,Delta,km)
+def TB_GF(omega,kx,y1,y2,t,mu,Delta,km,B,Vm,theta):
+    g_y1_y2=TB_SC_GF(omega,y1-y2,kx,t,mu,Delta,km,B)
+    g_y1=TB_SC_GF(omega,y1,kx,t,mu,Delta,km,B)
+    g_y2=TB_SC_GF(omega,-y2,kx,t,mu,Delta,km,B)
      
-    tau_z=np.array(([1,0],[0,-1]))
-    sigma_x=np.array(([0,1],[1,0]))
-    
-    if Vm==0:
-        T=np.zeros((4,4))
-    if Vm!=0:
-        T=np.linalg.inv(np.linalg.inv(Vm*np.kron(tau_z,sigma_x))-g_0)
+    T=TB_T_matrix(omega,kx,t,mu,Delta,km,B,Vm,theta)
         
     GF=g_y1_y2+g_y1@T@g_y2
     
@@ -350,6 +419,36 @@ def gapless(kf,km,Delta,B,Cm,theta):
         
     return zero_energy_DOS/len(kx_values)
   
+
+#TB Electronic Structure-------------------------------------------------------
+
+def TB_LDOS(omega,kx,y,t,mu,Delta,km,B,Vm,theta):
+    G=TB_GF(omega, kx, y, y, t, mu, Delta, km, B, Vm, theta)
+    LDOS=-1/np.pi*np.imag(np.trace(G))
+    
+    return LDOS
+
+def TB_DOS(omega,kx,y,t,mu,Delta,km,B,Vm,theta):
+    
+    kf=np.arccos(-mu/(2*t)-1)
+    
+    y_values=np.linspace(-50/kf,50/kf,10001)
+    
+    DOS=0
+    for y in y_values:
+        DOS+=TB_LDOS(omega,kx,y,t,mu,Delta,km,B,Vm,theta)
+        
+    return DOS
+
+def TB_in_gap_band_structure(kx,t,mu,Delta,km,B,Vm,theta):
+    effective_gap=abs(Delta)-abs(B)
+    
+    pole_condition=lambda omega:np.linalg.det(np.linalg.inv(TB_T_matrix(omega,kx,t,mu,Delta,km,B,Vm,theta)))
+    
+    positive_energy_mode=fsolve(pole_condition,x0=0.99*effective_gap)
+    negative_enery_mode=fsolve(pole_condition,x0=-0.99*effective_gap)
+    
+    return negative_enery_mode[0],positive_energy_mode[0]
     
     
     
@@ -358,13 +457,13 @@ def gapless(kf,km,Delta,B,Cm,theta):
     
     
     
-#Topological Properties--------------------------------------------------------    
+#Continuum Topological Properties--------------------------------------------------------    
 
 
 def continuum_topological_Hamiltonian(kx,kf,km,Delta,B,Cm,theta):
     top_ham=-Greens_function(0,kx,0,0,kf,km,Delta,B,Cm,theta)
     
-    top_ham+np.conj(top_ham.T)
+    top_ham+=np.conj(top_ham.T)
     return top_ham/2
     
 
@@ -383,7 +482,7 @@ def continuum_phase_boundaries(kf,km,Delta,B,theta,pm):
     g_12=-e_plus*Delta/(2*np.emath.sqrt(Delta**2-B**2))
     g_B=-B*e_plus/(2*np.emath.sqrt(Delta**2-B**2))
     
-    Cm=np.real(1/(g_B*np.cos(theta)+pm*np.emath.sqrt(g_B**2*np.cos(theta)+g_11**2+g_12**2-g_B**2)))
+    Cm=np.real(1/(g_B*np.cos(theta)+pm*np.emath.sqrt(g_B**2*np.cos(theta)**2+g_11**2+g_12**2-g_B**2)))
     
     return Cm  
 def continuum_phase_boundaries_numpy(kf,km,Delta,B,Cm,theta,pm):
@@ -397,18 +496,79 @@ def continuum_phase_boundaries_numpy(kf,km,Delta,B,Cm,theta,pm):
     g_12=-e_plus*Delta/(2*np.emath.sqrt(Delta**2-B**2))
     g_B=-B*e_plus/(2*np.emath.sqrt(Delta**2-B**2))
     
-    return Cm-np.real(1/(g_B*np.cos(theta)+pm*np.emath.sqrt(g_B**2*np.cos(theta)+g_11**2+g_12**2-g_B**2)))
+    return Cm-np.real(1/(g_B*np.cos(theta)+pm*np.emath.sqrt(g_B**2*np.cos(theta)**2+g_11**2+g_12**2-g_B**2)))
+
+
+
+#Tight Binding Topological Properties------------------------------------------
+
+
+def TB_topological_Hamiltonian(kx,y,t,mu,Delta,km,B,Vm,theta):
+    top_ham=-np.linalg.inv(TB_GF(0,kx, y, y, t, mu, Delta, km, B, Vm, theta))
+    
+    top_ham+=np.conj(top_ham.T)
+    
+    top_ham*=1/2
+    
+    return top_ham
+
+
+def TB_phase_boundaries(t,mu,Delta,km,B,theta,pm,kx=0):
+    mu_kx=mu+2*t*np.cos(kx+km)
+    z1=tight_binding_poles(0,mu_kx,Delta,B,1,1,-1)
+    z2=tight_binding_poles(0,mu_kx,Delta,B,1,-1,-1)
+    z3=tight_binding_poles(0,mu_kx,Delta,B,1,1,1)
+    z4=tight_binding_poles(0,mu_kx,Delta,B,1,-1,1)
+    
+    xi_plus=z1/((z1-z3)*(z1-z4))+z2/((z2-z3)*(z2-z4))
+    xi_min=z1/((z1-z3)*(z1-z4))-z2/((z2-z3)*(z2-z4))
+    
+    g_11=-1/(t*(z1-z2))*(-xi_plus*1j*np.emath.sqrt(Delta**2-B**2))
+    g_12=-1/(t*(z1-z2))*(xi_min*Delta)
+    g_B=-1/(t*(z1-z2))*(B*xi_min)
+    
+    Vm=np.real(1/(g_B*np.cos(theta)+pm*np.emath.sqrt(g_B**2*np.cos(theta)**2+g_11**2+g_12**2-g_B**2)))
+    
+    return Vm
+
+def TB_phase_boundaries_numpy(t,mu,Delta,km,B,Vm,theta,pm,kx=0):
+    mu_kx=mu+2*t*np.cos(kx+km)
+    z1=tight_binding_poles(0,mu_kx,Delta,B,1,1,-1)
+    z2=tight_binding_poles(0,mu_kx,Delta,B,1,-1,-1)
+    z3=tight_binding_poles(0,mu_kx,Delta,B,1,1,1)
+    z4=tight_binding_poles(0,mu_kx,Delta,B,1,-1,1)
+    
+    xi_plus=z1/((z1-z3)*(z1-z4))+z2/((z2-z3)*(z2-z4))
+    xi_min=z1/((z1-z3)*(z1-z4))-z2/((z2-z3)*(z2-z4))
+    
+    g_11=-1/(t*(z1-z2))*(-xi_plus*1j*np.emath.sqrt(Delta**2-B**2))
+    g_12=-1/(t*(z1-z2))*(xi_min*Delta)
+    g_B=-1/(t*(z1-z2))*(B*xi_min)
+    
+    Vm_crit=np.real(1/(g_B*np.cos(theta)+pm*np.emath.sqrt(g_B**2*np.cos(theta)**2+g_11**2+g_12**2-g_B**2)))
+    
+    return Vm-Vm_crit
+
+def TB_gap(Ny,t,mu,Delta,km,B,Vm,theta):
+    kx_values=np.linspace(-np.pi,np.pi,51)
+    lowest_energy_value=np.zeros(len(kx_values))
+    for kx_indx,kx in enumerate(kx_values):
+        lowest_energy_value[kx_indx]=abs(np.min(abs(np.linalg.eigvalsh(static_tight_binding_Hamiltonian(kx, Ny, t, mu, Delta, km, B, Vm, theta)))))
+        
+    return np.min(abs(lowest_energy_value))
+
+#General Topological Properties
   
 def pfaffian_invariant(Hamiltonian,parameters,system_size,TB=True):
     try:
         H=lambda k:Hamiltonian(k,*parameters)
         
         U=np.kron(np.array(([1,-1j],[1,1j])),np.identity(2))
-        U_tot=np.kron(np.identity(system_size),U)
+        U_tot=1/(np.sqrt(2))*np.kron(np.identity(system_size),U)
         
         if TB==True:
-            H_majorana_0=(np.conj(U_tot.T)@H(0)@U_tot+np.conj((np.conj(U_tot.T)@H(0)@U_tot).T))/2
-            H_majorana_pi=np.conj(U_tot.T)@H(np.pi)@U_tot
+            H_majorana_0=np.round(np.conj(U_tot.T)@H(0)@U_tot,decimals=6)
+            H_majorana_pi=np.round(np.conj(U_tot.T)@H(np.pi)@U_tot,decimals=6)
             
             invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)*pf.pfaffian(H_majorana_pi)))
         if TB==False:
@@ -418,16 +578,7 @@ def pfaffian_invariant(Hamiltonian,parameters,system_size,TB=True):
     except AssertionError:
         invariant=0
         
-    return invariant,np.real(pf.pfaffian(H_majorana_0))
+    return invariant
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
     
     
