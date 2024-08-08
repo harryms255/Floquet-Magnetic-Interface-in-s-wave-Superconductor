@@ -17,8 +17,8 @@ Cm_crit=continuum_phase_boundaries(kf, km, Delta, 0, np.pi/2, 1)
 
 km_values=np.linspace(0,2,251)
 Cm_values=np.linspace(-5,5,251)
-B_values=np.linspace(-Delta,Delta,501)
-theta_values=np.linspace(0,2*np.pi,501)
+B_values=np.linspace(-0.99*Delta,0.99*Delta,251)
+theta_values=np.linspace(0,2*np.pi,251)
 
 invariant_values=np.zeros((len(B_values),len(theta_values)))
 

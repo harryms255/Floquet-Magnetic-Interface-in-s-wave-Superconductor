@@ -220,8 +220,100 @@ def static_tight_binding_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta):
     
     return H
 
+def real_space_Hamiltonian(Nx,Ny,Hamiltonian,parameters):
+    H=lambda kx:Hamiltonian(kx,Ny,*parameters)
+    
+    real_space_Hamiltonian_matrix=np.zeros((4*Nx//2*Ny,4*Nx//2*Ny),dtype=np.complex128)
+    
+    h_elements={}
+    
+    for m in range(-Nx//2,Nx//2):
+        h=np.zeros((4*Ny,4*Ny),dtype=complex)
+        for i in range(Nx):
+            kx=2*np.pi*i/(Nx)
+            h_element=H(kx)
+            h+=np.e**(1j*kx*(m))*h_element/(Nx)
+        h_elements["{}".format(m)]=h
+    
+    for m in range(Nx//2):
+        for n in range(Nx//2):
+            lower_x_index=m*4*Ny
+            upper_x_index=(m+1)*4*Ny
+            lower_y_index=n*4*Ny
+            upper_y_index=(n+1)*4*Ny
+            
+            real_space_Hamiltonian_matrix[lower_x_index:upper_x_index,lower_y_index:upper_y_index]=h_elements["{}".format(m-n)]
+    
+    return real_space_Hamiltonian_matrix
 
+def real_space_spectrum(Nx,Ny,driving_frequency,Hamiltonian,parameters):
+    C=real_space_Hamiltonian(Nx, Ny, Hamiltonian, parameters)
+    
+    spectrum,U=np.linalg.eigh(C)
+    
+    position_average=np.real(np.diag(np.sqrt(np.conj(U.T)@(position_operator(Nx, Ny)**2)@U)))
+    return spectrum,position_average
 
+#projector---------------------------------------------------------------------
+def momentum_projector(kx,Ny,Hamiltonian,parameters):
+    H=lambda kx:Hamiltonian(kx,Ny,*parameters)
+    E,U=np.linalg.eigh(H(kx))
+    E_occ=E<0
+    U_occ=U[:,E_occ]
+    
+    P=U_occ@np.conj(U_occ.T)
+    
+    return P
+
+def real_space_correlator(Nx,Ny,Hamiltonian,parameters):
+    #Function that calculates real space correlator matrix
+    #It does this by calculating the fourier transform of the momentum space correlators at each integer x between -Nx//2 to Nx//2
+    #As the system is bounded from 0 to Nx//2 when an entanglement cut is made through the middle of it
+    #Then the block of the correlator matrix that measures correlations from a lattice site m to lattice n is simply the previously calculated
+    #element with x=m-n
+    #So a double loop then just iterates through the whole real space correlator placing the blocks in their correct places
+
+    real_space_correlator_matrix=np.zeros((4*Nx//2*Ny,4*Nx//2*Ny),dtype=np.complex128)
+    
+    correlator_elements={}
+    
+    for m in range(-Nx//2,Nx//2):
+        correlator_element=np.zeros((4*Ny,4*Ny),dtype=complex)
+        for i in range(Nx):
+            kx=2*np.pi*i/Nx
+            momentum_correlator=momentum_projector(kx, Ny,Hamiltonian, parameters)
+            correlator_element+=np.e**(1j*kx*(m))*momentum_correlator/Nx
+        correlator_elements["{}".format(m)]=correlator_element
+    
+    for m in range(Nx//2):
+        for n in range(Nx//2):
+            lower_x_index=m*4*Ny
+            upper_x_index=(m+1)*4*Ny
+            lower_y_index=n*4*Ny
+            upper_y_index=(n+1)*4*Ny
+            
+            real_space_correlator_matrix[lower_x_index:upper_x_index,lower_y_index:upper_y_index]=correlator_elements["{}".format(m-n)]
+    
+    return real_space_correlator_matrix
+
+def position_operator(Nx,Ny):
+    X=np.zeros(4*Nx//2*Ny)
+    for x in range(Nx//2):
+        for y in range(Ny):
+            X[4*y+4*Ny*x]=x-Ny/4
+            X[4*y+4*Ny*x+1]=x-Ny/4
+            X[4*y+4*Ny*x+2]=(x-Ny/4)
+            X[4*y+4*Ny*x+3]=(x-Ny/4)
+    X_operator=np.diagflat(X)/2
+    return X_operator
+    
+def entanglement_spectrum(Nx,Ny,Hamiltonian,parameters):
+    C=real_space_correlator(Nx, Ny, Hamiltonian, parameters)
+    
+    spectrum,U=np.linalg.eigh(C)
+    
+    position_average=np.real(np.diag(np.sqrt(np.conj(U.T)@(position_operator(Nx, Ny)**2)@U)))
+    return spectrum,position_average
 
 
 
@@ -235,7 +327,6 @@ def poles(omega,kx,kf,km,Delta,B,sigma,pm):
 def sigma_substrate_Greens_function(omega,kx,y,kf,km,Delta,B,sigma):
     #The greens function is written in units of m/kf so we ignore this factor out the front
     
-    omega=np.add(omega,0.0001j,casting="unsafe")
     
     p1=poles(omega,kx,kf,km,Delta,B,sigma,1)
     p2=poles(omega,kx,kf,km,Delta,B,sigma,-1)
@@ -311,7 +402,7 @@ def tight_binding_poles(omega,mu,Delta,B,sigma,pm1,pm2):
     return -a+pm2*np.emath.sqrt(a**2-1)
 
 def sigma_TB_GF(omega,y,kx,t,mu,Delta,km,B,sigma):
-    #omega=np.add(omega,0.00000001j,casting="unsafe")
+    
     mu_kx=mu+2*t*np.cos(kx+sigma*km)
     z1=tight_binding_poles(omega,mu_kx,Delta,B,sigma,1,-1)
     z2=tight_binding_poles(omega,mu_kx,Delta,B,sigma,-1,-1)
@@ -384,6 +475,7 @@ def TB_GF(omega,kx,y1,y2,t,mu,Delta,km,B,Vm,theta):
 #Continuum Electronic Structure----------------------------------------------------------
 
 def LDOS(omega,kx,y,kf,km,Delta,B,Cm,theta):
+    omega=np.add(omega,0.0001j,casting="unsafe")
     G=Greens_function(omega,kx,y,y,kf,km,Delta,B,Cm,theta)
     
     LDOS=-1/np.pi*np.imag(np.trace(G))
@@ -423,6 +515,7 @@ def gapless(kf,km,Delta,B,Cm,theta):
 #TB Electronic Structure-------------------------------------------------------
 
 def TB_LDOS(omega,kx,y,t,mu,Delta,km,B,Vm,theta):
+    omega=np.add(omega,0.0001j,casting="unsafe")
     G=TB_GF(omega, kx, y, y, t, mu, Delta, km, B, Vm, theta)
     LDOS=-1/np.pi*np.imag(np.trace(G))
     
@@ -445,8 +538,8 @@ def TB_in_gap_band_structure(kx,t,mu,Delta,km,B,Vm,theta):
     
     pole_condition=lambda omega:np.linalg.det(np.linalg.inv(TB_T_matrix(omega,kx,t,mu,Delta,km,B,Vm,theta)))
     
-    positive_energy_mode=fsolve(pole_condition,x0=0.99*effective_gap)
-    negative_enery_mode=fsolve(pole_condition,x0=-0.99*effective_gap)
+    positive_energy_mode=fsolve(pole_condition,x0=0.99*effective_gap*0)
+    negative_enery_mode=fsolve(pole_condition,x0=-0.99*effective_gap*0)
     
     return negative_enery_mode[0],positive_energy_mode[0]
     
@@ -558,6 +651,15 @@ def TB_gap(Ny,t,mu,Delta,km,B,Vm,theta):
     return np.min(abs(lowest_energy_value))
 
 #General Topological Properties
+def pfaffian(operator):
+    n=len(operator[:,0])//2
+    sigma_y=np.array(([0,-1j],[1j,0]))
+    A=np.kron(sigma_y,np.identity(n))
+    
+    pfaffian_value=(1j)**(n**2)*np.exp(1/2*np.trace(sl.logm(((A.T)@operator))))
+    
+    return pfaffian_value
+    
   
 def pfaffian_invariant(Hamiltonian,parameters,system_size,TB=True):
     try:
@@ -570,15 +672,68 @@ def pfaffian_invariant(Hamiltonian,parameters,system_size,TB=True):
             H_majorana_0=np.round(np.conj(U_tot.T)@H(0)@U_tot,decimals=6)
             H_majorana_pi=np.round(np.conj(U_tot.T)@H(np.pi)@U_tot,decimals=6)
             
+            # H_majorana_0-=H_majorana_0.T
+            # H_majorana_pi-=H_majorana_pi.T
+            # H_majorana_0*=0.5
+            # H_majorana_pi*=0.5
+            
             invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)*pf.pfaffian(H_majorana_pi)))
+            #invariant=np.real(np.sign(pfaffian(H_majorana_0)*pfaffian(H_majorana_pi)))
         if TB==False:
             H_majorana_0=np.round((np.conj(U_tot.T)@H(0)@U_tot+np.conj((np.conj(U_tot.T)@H(0)@U_tot).T))/2,decimals=5)
             
             invariant=np.real(np.sign(pf.pfaffian(H_majorana_0)))
     except AssertionError:
         invariant=0
+        #print("Operator not anti-symmetric")
         
     return invariant
+
+#Numerical Methods-------------------------------------------------------------
+
+
+def Newton_Raphson_update(x0,function,parameters):
+    dx=0.00000001
+    
+    f=lambda x:function(x,*parameters)
+    
+    x1=x0-f(x0)/((f(x0+dx)-f(x0-dx))/(2*dx))
+    
+    return x1
+
+def bisection_search(function,parameters,x0,x1,fallback_solution=0):
+    threshold=10**(-8)
+    complete=False
+    
+    f=lambda x:function(x,*parameters)
+    
+    while complete==False:
+        if x1-x0<threshold:
+            solution=(x1+x0)/2
+            complete=True
+        else:
+            function_0=np.real(f(x0))
+            function_1=np.real(f(x1))
+            function_mid=np.real(f((x1+x0)/2))
+            #print(function_0,function_mid,function_1,"\n")
+            
+            if np.sign(function_0*function_mid)<=0:
+                x0=x0
+                x1=(x1+x0)/2
+                #print(x0,x1, "\n")
+                continue
+            elif np.sign(function_1*function_mid)<=0:
+                
+                x0=(x1+x0)/2
+                x1=x1
+                #print(x0,x1,"\n")
+                continue
+            else:
+                #print("No solution in given region")
+                solution=fallback_solution
+                break
+    return solution
+        
 
     
     

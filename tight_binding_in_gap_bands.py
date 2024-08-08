@@ -14,7 +14,7 @@ mu=-3.6
 km=0.65
 Delta=0.1
 B=0.5*Delta
-theta=np.pi/2
+theta=np.pi/3
 Vm_crit=TB_phase_boundaries(t, mu, Delta, km, B, theta, 1)
 Vm_values=[0.7*Vm_crit,0.8*Vm_crit,0.9*Vm_crit,Vm_crit,1.1*Vm_crit,1.2*Vm_crit,1.3*Vm_crit]
 

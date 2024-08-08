@@ -13,26 +13,23 @@ t=1
 mu=-3.6
 km=0.65
 Delta=0.1
-B=0.9*Delta
-theta=0
+Vm=TB_phase_boundaries(t, mu, Delta, km, 0, np.pi/2, 1)
 
-Vm_values=np.linspace(-6,6,501)
-km_values=np.linspace(0,np.pi,501)
-theta_values=np.linspace(0,np.pi/2,501)
+theta_values=np.linspace(0,2*np.pi,251)
+B_values=np.linspace(-Delta,Delta,251)
 
-gap_values=np.zeros((len(Vm_values),len(km_values)))
+gap_values=np.zeros((len(B_values),len(theta_values)))
 
-for Vm_indx,Vm in enumerate(tqdm(Vm_values)):
-    #for km_indx,km in enumerate(km_values):
+for B_indx,B in enumerate(tqdm(B_values)):
     for theta_indx,theta in enumerate(theta_values):
-        gap_values[Vm_indx,theta_indx]=TB_gap(Ny,t, mu, Delta, km, B, Vm, theta)
+        gap_values[B_indx,theta_indx]=TB_gap(Ny,t, mu, Delta, km, B, Vm, theta)
         np.savetxt("tight_binding_gap.txt",gap_values)
         
 plt.figure(figsize=[12,8])
-sns.heatmap(gap_values,cmap="viridis",vmax=1,vmin=0)
+sns.heatmap(gap_values/Delta,cmap="viridis",vmin=0)
 plt.gca().invert_yaxis()
 
-theta,Vm=np.meshgrid(theta_values,Vm_values)
+theta,B=np.meshgrid(theta_values,B_values)
 
 phase_boundaries_1=TB_phase_boundaries_numpy(t, mu, Delta, km, B, Vm, theta, 1)
 phase_boundaries_2=TB_phase_boundaries_numpy(t, mu, Delta, km, B, Vm, theta, -1)
@@ -43,13 +40,14 @@ plt.contour(phase_boundaries_2,levels=[0],linestyles="dashed",linewidths=5,color
 plt.contour(phase_boundaries_3,levels=[0],linestyles="dashed",linewidths=5,colors="black")
 plt.contour(phase_boundaries_4,levels=[0],linestyles="dashed",linewidths=5,colors="black")
 
-x_ticks=[i*len(km_values)/max(km_values/(np.pi/10)) for i in range(11)]      
-x_labels=[str(i/10) for i in range(int(max(km_values)/(np.pi/10))+1)]
-y_ticks=[i*len(Vm_values)/6 for i in range(7)]      
-y_labels=[str(np.round(np.min(Vm_values)+i/6*(max(Vm_values)-min(Vm_values)),2)) for i in range(7)]
+x_ticks=[i*len(theta_values)/max(theta_values/(2*np.pi/4)) for i in range(5)]      
+x_labels=[str(i/4*max(theta_values)/np.pi) for i in range(5)]
+y_ticks=[i*len(B_values)/4 for i in range(5)]      
+y_labels=[str(np.round(np.min(B_values)/Delta+i/4*(max(B_values)-min(B_values))/Delta,2)) for i in range(5)]
     
 plt.yticks(ticks=y_ticks,labels=y_labels)
 plt.xticks(ticks=x_ticks,labels=x_labels)
 
 plt.ylabel("$V_m/t$")
 plt.xlabel("$k_m/\pi$")
+
