@@ -47,6 +47,8 @@ Any Hamiltonian will always have its first paremeter be kx
 
 import numpy as np
 import scipy.linalg as sl
+import scipy.sparse.linalg as spl
+from scipy.sparse import dok_matrix
 from pfapack import pfaffian as pf
 from scipy.optimize import fsolve
 import matplotlib.pyplot as plt
@@ -60,7 +62,7 @@ plt.rcParams.update({'font.size': 30})
 
 
 #Tight Binding-----------------------------------------------------------------
-def driven_tight_binding_Hamiltonian(kx,T,Ny,t,mu,Delta,Vm,km,omega):
+def driven_tight_binding_Hamiltonian(kx,Ny,T,period,t,mu,Delta,Vm,km):
     """
     Tight Binding Hamiltonian of a 2D s-wave superconductor with a chain of magnetic 
     moments at y=Ny//2, spiralling in the xy plane with wavevector km
@@ -92,7 +94,7 @@ def driven_tight_binding_Hamiltonian(kx,T,Ny,t,mu,Delta,Vm,km,omega):
 
     """
 
-    H=np.zeros((4*Ny,4*Ny),dtype=float)
+    H=np.zeros((4*Ny,4*Ny),dtype=complex)
     
     #y hopping terms
     for y in range(Ny):
@@ -108,13 +110,14 @@ def driven_tight_binding_Hamiltonian(kx,T,Ny,t,mu,Delta,Vm,km,omega):
         
     #S-Wave Pairing Terms
     for y in range(Ny):
-        H[4*y,4*y+3]=Delta[y]
-        H[4*y+1,4*y+2]=-Delta[y]
+        H[4*y,4*y+3]=Delta
+        H[4*y+1,4*y+2]=-Delta
         #H[4*y+1,4*y+2]=-Delta[y]
     
     #Magnetic Scattering Terms
     
     y=Ny//2
+    omega=2*np.pi/period
     
     H[4*y,4*y+1]=Vm*np.e**(1j*omega*T)
     H[4*y+2,4*y+3]=-Vm*np.e**(-1j*omega*T)
@@ -132,18 +135,32 @@ def driven_tight_binding_Hamiltonian(kx,T,Ny,t,mu,Delta,Vm,km,omega):
     return H
 
 
-def floquet_Hamiltonian(k,Hamiltonian,parameters,omega):
-    H=lambda k,t:Hamiltonian(k,t,*parameters)
-    period=2*np.pi/omega
-    t_values=np.linspace(0,period,1001)
+# def floquet_Hamiltonian(kx,Ny,period,Hamiltonian,parameters):
+#     H=lambda kx,T:Hamiltonian(kx,Ny,T,period,*parameters)
+#     T_values=np.linspace(0,period,1001)
+#     dt=period/len(T_values)
     
-    H_eff=lambda k:sum(H(k,t_values))/period
+#     U=np.identity(4*Ny,dtype=complex)
+#     for T in T_values:
+#         U=U@sl.expm(-1j*dt*H(kx,T))
     
-    U=lambda k:sl.expm(1j*H_eff(k)*period)
     
-    return -1j*period*sl.logm(U(k))
+#     return -1j/T*sl.logm(U)
 
-def static_tight_binding_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta):
+def floquet_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta):
+    
+    period=np.pi/B
+    
+    sigma_z=np.kron(np.identity(Ny),np.array(([1,0,0,0],[0,-1,0,0],[0,0,-1,0],[0,0,0,1])))
+                    
+    U=sl.expm(-1j*B*period*sigma_z)@sl.expm(-1j*period*static_tight_binding_Hamiltonian(kx, Ny, t, mu, Delta, km, B, Vm, theta))
+    
+    HF=-1j/period*sl.logm(U)
+    
+    return HF
+                    
+
+def static_tight_binding_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta,sparse=False):
     """
     Tight Binding Hamiltonian of a 2D s-wave superconductor with a chain of magnetic 
     moments at y=Ny//2, spiralling in the xy plane with wavevector km
@@ -174,8 +191,10 @@ def static_tight_binding_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta):
         Matrix representation of Bloch Hamiltonian
 
     """
-
-    H=np.zeros((4*Ny,4*Ny),dtype=float)
+    if sparse==True:
+        H=dok_matrix((4*Ny,4*Ny),dtype=float)
+    else:
+        H=np.zeros((4*Ny,4*Ny),dtype=float)
     
     #y hopping terms
     for y in range(Ny):
@@ -218,12 +237,18 @@ def static_tight_binding_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta):
     H[4*y+2,4*y+2]+=-Vm*np.cos(theta)
     H[4*y+3,4*y+3]+=Vm*np.cos(theta)
     
+    if sparse==True:
+        H=H.tocsc()
+    
     return H
 
-def real_space_Hamiltonian(Nx,Ny,Hamiltonian,parameters):
-    H=lambda kx:Hamiltonian(kx,Ny,*parameters)
+def real_space_Hamiltonian(Nx,Ny,Hamiltonian,parameters,sparse=False):
+    H=lambda kx:Hamiltonian(kx,Ny,*parameters,sparse=True)
     
-    real_space_Hamiltonian_matrix=np.zeros((4*Nx//2*Ny,4*Nx//2*Ny),dtype=np.complex128)
+    if sparse==True:
+        real_space_Hamiltonian_matrix=dok_matrix((4*Nx//2*Ny,4*Nx//2*Ny),dtype=complex)
+    else:
+        real_space_Hamiltonian_matrix=np.zeros((4*Nx//2*Ny,4*Nx//2*Ny),dtype=np.complex128)
     
     h_elements={}
     
@@ -243,16 +268,26 @@ def real_space_Hamiltonian(Nx,Ny,Hamiltonian,parameters):
             upper_y_index=(n+1)*4*Ny
             
             real_space_Hamiltonian_matrix[lower_x_index:upper_x_index,lower_y_index:upper_y_index]=h_elements["{}".format(m-n)]
+    if sparse==True:
+        real_space_Hamiltonian_matrix=real_space_Hamiltonian_matrix.tocsc()
     
     return real_space_Hamiltonian_matrix
 
-def real_space_spectrum(Nx,Ny,driving_frequency,Hamiltonian,parameters):
+def real_space_spectrum(Nx,Ny,Hamiltonian,parameters):
     C=real_space_Hamiltonian(Nx, Ny, Hamiltonian, parameters)
     
     spectrum,U=np.linalg.eigh(C)
     
     position_average=np.real(np.diag(np.sqrt(np.conj(U.T)@(position_operator(Nx, Ny)**2)@U)))
     return spectrum,position_average
+
+def sparse_real_space_spectrum(Nx,Ny,Nev,Hamiltonian,parameters):
+    C=real_space_Hamiltonian(Nx, Ny, Hamiltonian, parameters,sparse=True)
+    
+    spectrum,U=spl.eigsh(C,k=Nev,return_eigenvectors=True,which="SM")
+    position_average=np.real(np.diag(np.sqrt(np.conj(U.T)@(position_operator(Nx, Ny,sparse=True)**2)@U)))
+    return spectrum,position_average
+    
 
 #projector---------------------------------------------------------------------
 def momentum_projector(kx,Ny,Hamiltonian,parameters):
@@ -296,7 +331,8 @@ def real_space_correlator(Nx,Ny,Hamiltonian,parameters):
     
     return real_space_correlator_matrix
 
-def position_operator(Nx,Ny):
+def position_operator(Nx,Ny,sparse=False):
+    
     X=np.zeros(4*Nx//2*Ny)
     for x in range(Nx//2):
         for y in range(Ny):
@@ -305,6 +341,9 @@ def position_operator(Nx,Ny):
             X[4*y+4*Ny*x+2]=(x-Ny/4)
             X[4*y+4*Ny*x+3]=(x-Ny/4)
     X_operator=np.diagflat(X)/2
+    
+    if sparse==True:
+        X_operator=dok_matrix(X_operator)
     return X_operator
     
 def entanglement_spectrum(Nx,Ny,Hamiltonian,parameters):
