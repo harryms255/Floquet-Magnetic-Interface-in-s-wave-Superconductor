@@ -1,6 +1,8 @@
 <<<<<<< HEAD
 Set of functions to calculate the electronic structure of a spiral magnetic in face rotating at a constant frequency embedded into a s-wave superconductor
 
+All scripts can run independently apart from requiring "functions_file.py"
+
 Parameters used in functions
 
 Continuum Model
