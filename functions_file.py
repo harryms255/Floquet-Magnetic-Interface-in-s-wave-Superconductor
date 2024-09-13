@@ -48,12 +48,14 @@ Any Hamiltonian will always have its first paremeter be kx
 import numpy as np
 import scipy.linalg as sl
 import scipy.sparse.linalg as spl
+import scipy.sparse as sp
 from scipy.sparse import dok_matrix
 from pfapack import pfaffian as pf
 from scipy.optimize import fsolve
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
+from random import uniform
 
 plt.rc('font', family='serif')
 plt.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}\usepackage{amssymb}'
@@ -133,32 +135,6 @@ def driven_tight_binding_Hamiltonian(kx,Ny,T,period,t,mu,Delta,Vm,km):
         H[4*y+3,4*y+3]=2*t*np.cos(-kx-km)+mu
     
     return H
-
-
-# def floquet_Hamiltonian(kx,Ny,period,Hamiltonian,parameters):
-#     H=lambda kx,T:Hamiltonian(kx,Ny,T,period,*parameters)
-#     T_values=np.linspace(0,period,1001)
-#     dt=period/len(T_values)
-    
-#     U=np.identity(4*Ny,dtype=complex)
-#     for T in T_values:
-#         U=U@sl.expm(-1j*dt*H(kx,T))
-    
-    
-#     return -1j/T*sl.logm(U)
-
-def floquet_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta):
-    
-    period=np.pi/B
-    
-    sigma_z=np.kron(np.identity(Ny),np.array(([1,0,0,0],[0,-1,0,0],[0,0,-1,0],[0,0,0,1])))
-                    
-    U=sl.expm(-1j*B*period*sigma_z)@sl.expm(-1j*period*static_tight_binding_Hamiltonian(kx, Ny, t, mu, Delta, km, B, Vm, theta))
-    
-    HF=-1j/period*sl.logm(U)
-    
-    return HF
-                    
 
 def static_tight_binding_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta,sparse=False):
     """
@@ -242,52 +218,222 @@ def static_tight_binding_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta,sparse=False
     
     return H
 
-def real_space_Hamiltonian(Nx,Ny,Hamiltonian,parameters,sparse=False):
-    H=lambda kx:Hamiltonian(kx,Ny,*parameters,sparse=True)
+def real_space_static_tight_binding_Hamiltonian(Nx,Ny,t,mu,Delta,km,B,Vm,theta,sparse=False):
+    
+    sigma_x=np.array(([0,1],[1,0]),dtype=complex)
+    sigma_y=np.array(([0,-1j],[1j,0]),dtype=complex)
+    sigma_z=np.array(([1,0],[0,-1]),dtype=complex)
     
     if sparse==True:
-        real_space_Hamiltonian_matrix=dok_matrix((4*Nx//2*Ny,4*Nx//2*Ny),dtype=complex)
+        H=dok_matrix((4*Nx*Ny,4*Nx*Ny),dtype=complex)
     else:
-        real_space_Hamiltonian_matrix=np.zeros((4*Nx//2*Ny,4*Nx//2*Ny),dtype=np.complex128)
+        H=np.zeros((4*Nx*Ny,4*Nx*Ny),dtype=np.complex128)
     
-    h_elements={}
+    #(x,y) is the 4*x+4*Nx*y position in the spinor
     
-    for m in range(-Nx//2,Nx//2):
-        h=np.zeros((4*Ny,4*Ny),dtype=complex)
-        for i in range(Nx):
-            kx=2*np.pi*i/(Nx)
-            h_element=H(kx)
-            h+=np.e**(1j*kx*(m))*h_element/(Nx)
-        h_elements["{}".format(m)]=h
-    
-    for m in range(Nx//2):
-        for n in range(Nx//2):
-            lower_x_index=m*4*Ny
-            upper_x_index=(m+1)*4*Ny
-            lower_y_index=n*4*Ny
-            upper_y_index=(n+1)*4*Ny
+    for x in range(Nx):
+        for y in range(Ny):
             
-            real_space_Hamiltonian_matrix[lower_x_index:upper_x_index,lower_y_index:upper_y_index]=h_elements["{}".format(m-n)]
-    if sparse==True:
-        real_space_Hamiltonian_matrix=real_space_Hamiltonian_matrix.tocsc()
+            # x hopping
+            if x!=Nx-1:
+                H[4*x+4*Nx*y,4*(x+1)+4*Nx*y]=-t
+                H[4*x+4*Nx*y+1,4*(x+1)+4*Nx*y+1]=-t
+                H[4*x+4*Nx*y+2,4*(x+1)+4*Nx*y+2]=t
+                H[4*x+4*Nx*y+3,4*(x+1)+4*Nx*y+3]=t
+            
+            #y-hopping
+            if y!=Ny-1:
+                H[4*x+4*Nx*y,4*(x)+4*Nx*(y+1)]=-t
+                H[4*x+4*Nx*y+1,4*(x)+4*Nx*(y+1)+1]=-t
+                H[4*x+4*Nx*y+2,4*(x)+4*Nx*(y+1)+2]=t
+                H[4*x+4*Nx*y+3,4*(x)+4*Nx*(y+1)+3]=t
+                
+            #Pairing
+            H[4*x+4*Nx*y,4*x+4*Nx*y+3]=Delta
+            H[4*x+4*Nx*y+1,4*x+4*Nx*y+2]=-Delta
+            
+           
+                
+            
+    H+=np.conj(H.T)
     
-    return real_space_Hamiltonian_matrix
+    for x in range(Nx):
+        for y in range(Ny):
+            #chemical potential
+            
+            H[4*x+4*Nx*y,4*(x)+4*Nx*y]=-mu
+            H[4*x+4*Nx*y+1,4*(x)+4*Nx*y+1]=-mu
+            H[4*x+4*Nx*y+2,4*(x)+4*Nx*y+2]=mu
+            H[4*x+4*Nx*y+3,4*(x)+4*Nx*y+3]=mu
+            
+            #scattering
+            
+            if y==Ny//2:
+                
+                H[4*x+4*Nx*y:4*(x)+4*Nx*y+2,4*x+4*Nx*y:4*(x)+4*Nx*y+2]+=Vm*(np.cos(2*km*x)*np.sin(theta)*sigma_x+np.sin(2*km*x)*np.sin(theta)*sigma_y)
+                H[4*x+4*Nx*y+2:4*(x)+4*Nx*y+4,4*x+4*Nx*y+2:4*(x)+4*Nx*y+4]+=-Vm*(np.conj(np.cos(2*km*x)*np.sin(theta)*sigma_x+np.sin(2*km*x)*np.sin(theta)*sigma_y))
+                H[4*x+4*Nx*y:4*(x)+4*Nx*y+2,4*x+4*Nx*y:4*(x)+4*Nx*y+2]+=Vm*np.cos(theta)*sigma_z
+                H[4*x+4*Nx*y+2:4*(x)+4*Nx*y+4,4*x+4*Nx*y+2:4*(x)+4*Nx*y+4]+=-Vm*np.conj(np.cos(theta)*sigma_z)
+                
+   
+    
+    if sparse==True:
+        H=H.tocsc()
+    
+    return H
+    
+    
+    
+def position_operator(Nx,Ny,sparse=False):
+   
+    
+    if sparse==False:
+        X=np.zeros(4*Nx*Ny)
+            
+          
+        for x in range(Nx):
+            for y in range(Ny):
+                X[4*x+4*Nx*y]=x-Nx/2
+                X[4*x+4*Nx*y+1]=x-Nx/2
+                X[4*x+4*Nx*y+2]=(x-Nx/2)
+                X[4*x+4*Nx*y+3]=(x-Nx/2)
+        X_operator=np.diagflat(X)
+    
+    if sparse==True:
+        X=dok_matrix((4*Nx*Ny,4*Nx*Ny))
+        for x in range(Nx):
+            for y in range(Ny):
+                X[4*x+4*Nx*y,4*x+4*Nx*y]=x-Nx/2
+                X[4*x+4*Nx*y+1,4*x+4*Nx*y+1]=x-Nx/2
+                X[4*x+4*Nx*y+2,4*x+4*Nx*y+2]=(x-Nx/2)
+                X[4*x+4*Nx*y+3,4*x+4*Nx*y+3]=(x-Nx/2)
+        X_operator=X.tocsc()
+    return X_operator
 
-def real_space_spectrum(Nx,Ny,Hamiltonian,parameters):
-    C=real_space_Hamiltonian(Nx, Ny, Hamiltonian, parameters)
+def y_position_operator(Nx,Ny,sparse=False):
+    
+    if sparse==False:
+        Y=np.zeros(4*Nx*Ny)
+            
+          
+        for x in range(Nx):
+            for y in range(Ny):
+                Y[4*x+4*Nx*y]=y-Ny/2
+                Y[4*x+4*Nx*y+1]=y-Ny/2
+                Y[4*x+4*Nx*y+2]=(y-Ny/2)
+                Y[4*x+4*Nx*y+3]=(y-Ny/2)
+        Y_operator=np.diagflat(Y)
+    
+    if sparse==True:
+        Y=dok_matrix((4*Nx*Ny,4*Nx*Ny))
+        for x in range(Nx):
+            for y in range(Ny):
+                Y[4*x+4*Nx*y,4*x+4*Nx*y]=y-Ny/2
+                Y[4*x+4*Nx*y+1,4*x+4*Nx*y+1]=y-Ny/2
+                Y[4*x+4*Nx*y+2,4*x+4*Nx*y+2]=(y-Ny/2)
+                Y[4*x+4*Nx*y+3,4*x+4*Nx*y+3]=(y-Ny/2)
+        Y_operator=Y.tocsc()
+    return Y_operator
+
+def real_space_spectrum(Nx,Ny,t,mu,Delta,km,B,Vm,theta):
+    C=real_space_static_tight_binding_Hamiltonian(Nx, Ny, t, mu, Delta, km, B, Vm, theta)
     
     spectrum,U=np.linalg.eigh(C)
     
     position_average=np.real(np.diag(np.sqrt(np.conj(U.T)@(position_operator(Nx, Ny)**2)@U)))
     return spectrum,position_average
 
-def sparse_real_space_spectrum(Nx,Ny,Nev,Hamiltonian,parameters):
-    C=real_space_Hamiltonian(Nx, Ny, Hamiltonian, parameters,sparse=True)
+def sparse_real_space_spectrum(Nx,Ny,Nev,t,mu,Delta,km,B,Vm,theta):
+    C=real_space_static_tight_binding_Hamiltonian(Nx, Ny, t, mu, Delta, km, B, Vm, theta,sparse=True)
     
-    spectrum,U=spl.eigsh(C,k=Nev,return_eigenvectors=True,which="SM")
+    spectrum,U=spl.eigsh(C,k=Nev,return_eigenvectors=True,sigma=0, which ='LM')
+    
     position_average=np.real(np.diag(np.sqrt(np.conj(U.T)@(position_operator(Nx, Ny,sparse=True)**2)@U)))
     return spectrum,position_average
     
+    # spectrum=spl.eigsh(C,k=Nev,sigma=0, which ='LM',return_eigenvectors=False)
+    # return spectrum
+
+
+#Floquet Hamiltonians----------------------------------------------------------
+
+def floquet_Hamiltonian(kx,Ny,t,mu,Delta,km,B,Vm,theta):
+    
+    period=np.pi/B
+    
+    
+                    
+    U=-sl.expm(-1j*period*static_tight_binding_Hamiltonian(kx, Ny, t, mu, Delta, km, B, Vm, theta))
+    
+    HF=1j/period*sl.logm(U)
+    
+    return HF
+
+def real_space_floquet_Hamiltonian(Nx,Ny,t,mu,Delta,km,B,Vm,theta):
+    
+
+       
+   period=np.pi/B
+   
+   H=real_space_static_tight_binding_Hamiltonian(Nx, Ny, t, mu, Delta, km, B, Vm, theta)
+   
+   positive_eigenvalues,positive_eigenstates=spl.eigsh(H,k=2*Nx*Ny,sigma=0,which="LA")
+   negative_eigenvalues,negative_eigenstates=spl.eigsh(-H,k=2*Nx*Ny,sigma=0,which="LA")
+   
+   eigenvalues=np.concatenate((-negative_eigenvalues, positive_eigenvalues))
+   
+   eigenstates=np.concatenate((negative_eigenstates, positive_eigenstates),axis=1)
+   
+   Hf=eigenstates@(np.diag(np.log(np.exp(-1j*period*eigenvalues))))@np.conj(eigenstates.T)
+   
+   return Hf
+
+def real_space_floquet_spectrum(Nx, Ny, Nev, t, mu, Delta, km, B, Vm, theta):
+    C=real_space_floquet_Hamiltonian(Nx, Ny, t, mu, Delta, km, B, Vm, theta)
+    
+    
+    spectrum=spl.eigsh(C,k=Nev,sigma=0, which ='LM',return_eigenvectors=False)
+    return spectrum
+
+
+
+
+#Floquet Spectral Localiser------------------------------------------------------------
+
+def spectral_localiser(x,y,E,Nx,Ny,t,mu,Delta,km,B,Vm,theta):
+    
+    X=position_operator(Nx, Ny,sparse=True)
+    Y=y_position_operator(Nx, Ny,sparse=True)
+    H=real_space_floquet_Hamiltonian(Nx, Ny, t, mu, Delta, km, B, Vm, theta)
+    
+    k=0.001
+    
+    L=sp.csc_matrix(sp.array([H-E*sp.identity(4*Nx*Ny),k*(X-1j*Y-(x-1j*y)*sp.identity(4*Nx*Ny))],[k*(X+1j*Y-(x+1j*y)*sp.identity(4*Nx*Ny)),E*sp.identity(4*Nx*Ny)-H]))
+    return L
+
+def localiser_gap(x,y,E,Nx,Ny,t,mu,Delta,km,B,Vm,theta):
+    L=spectral_localiser(x, y, E, Nx, Ny, t, mu, Delta, km, B, Vm, theta)
+    
+    eigenvalues=spl.eigsh(L,k=1,sigma=0,which="LM")
+    
+    gap=np.min(abs(eigenvalues))
+    
+    return gap
+
+def class_D_invariant(x,Nx,Ny,t,mu,Delta,km,B,Vm,theta):
+    X=position_operator(Nx, Ny,sparse=True)
+    H=real_space_floquet_Hamiltonian(Nx, Ny, t, mu, Delta, km, B, Vm, theta)
+    
+    k=0.001
+    
+    C=k(X-x*sp.identity(4*Nx*Ny))+1j*H
+    
+    sgn,logdet=np.slogdet(C.A)
+    
+    return sgn
+    
+    
+
 
 #projector---------------------------------------------------------------------
 def momentum_projector(kx,Ny,Hamiltonian,parameters):
@@ -331,27 +477,13 @@ def real_space_correlator(Nx,Ny,Hamiltonian,parameters):
     
     return real_space_correlator_matrix
 
-def position_operator(Nx,Ny,sparse=False):
-    
-    X=np.zeros(4*Nx//2*Ny)
-    for x in range(Nx//2):
-        for y in range(Ny):
-            X[4*y+4*Ny*x]=x-Ny/4
-            X[4*y+4*Ny*x+1]=x-Ny/4
-            X[4*y+4*Ny*x+2]=(x-Ny/4)
-            X[4*y+4*Ny*x+3]=(x-Ny/4)
-    X_operator=np.diagflat(X)/2
-    
-    if sparse==True:
-        X_operator=dok_matrix(X_operator)
-    return X_operator
     
 def entanglement_spectrum(Nx,Ny,Hamiltonian,parameters):
     C=real_space_correlator(Nx, Ny, Hamiltonian, parameters)
     
     spectrum,U=np.linalg.eigh(C)
     
-    position_average=np.real(np.diag(np.sqrt(np.conj(U.T)@(position_operator(Nx, Ny)**2)@U)))
+    position_average=np.real(np.diag(np.sqrt(np.conj(U.T)@(position_operator(Nx//2, Ny)**2)@U)))
     return spectrum,position_average
 
 
@@ -772,7 +904,101 @@ def bisection_search(function,parameters,x0,x1,fallback_solution=0):
                 solution=fallback_solution
                 break
     return solution
+
+
+#Real Space topological Hamiltonian--------------------------------------------
         
 
+def real_space_topological_hamiltonian(Nx,t,mu,Delta,km,B,Vm,theta,disorder=0,disorder_config=0):
     
     
+    H=np.zeros((4*Nx,4*Nx),dtype=complex)
+    
+    hamiltonian_elements={}
+    Nx_eff=2*Nx
+    
+    for m in range(-Nx,Nx):
+        h_element=np.zeros((4,4),dtype=complex)
+        for i in range(Nx_eff):
+            kx=2*np.pi*i/Nx_eff
+            kx_top_ham=TB_topological_Hamiltonian(kx, 0, t, mu, Delta, km, B, Vm, theta)
+            h_element+=np.e**(1j*kx*(m))*kx_top_ham/Nx_eff
+        hamiltonian_elements["{}".format(m)]=h_element
+    
+    for m in range(Nx):
+        for n in range(Nx):
+            lower_x_index=m*4
+            upper_x_index=(m+1)*4
+            lower_y_index=n*4
+            upper_y_index=(n+1)*4
+            
+            if m-n==1 or m-n==-1:
+                if disorder_config==0:
+            
+                    H[lower_x_index:upper_x_index,lower_y_index:upper_y_index]=hamiltonian_elements["{}".format(m-n)]+disorder*uniform(-1,1)*np.array(([1,0,0,0],[0,1,0,0],[0,0,-1,0],[0,0,0,-1]))
+                
+                else:
+                    H[lower_x_index:upper_x_index,lower_y_index:upper_y_index]=hamiltonian_elements["{}".format(m-n)]+disorder*disorder_config[m]*np.array(([1,0,0,0],[0,1,0,0],[0,0,-1,0],[0,0,0,-1]))
+            
+            else:
+                H[lower_x_index:upper_x_index,lower_y_index:upper_y_index]=hamiltonian_elements["{}".format(m-n)]
+    return H
+
+def real_space_floquet_topological_hamiltonian(Nx,t,mu,Delta,km,B,Vm,theta,disorder=0,disorder_config=0):
+    H=real_space_topological_hamiltonian(Nx, t, mu, Delta, km, B, Vm, theta,disorder=disorder,disorder_config=disorder_config)
+    
+    period=np.pi/B
+    U=sl.expm(-1j*period*H)
+    
+    HF=1j*sl.logm(U)
+    
+    return HF
+
+
+def one_D_position_operator(Nx):
+    X=np.zeros(4*Nx)
+    for x in range(Nx):
+        X[4*x]=x
+        X[4*x+1]=x
+        X[4*x+2]=x
+        X[4*x+3]=x
+    X_operator=np.diagflat(X)
+
+    return X_operator
+
+def topological_hamiltonian_spectral_localiser(x,E,Nx,t,mu,Delta,km,B,Vm,theta,disorder=0,disorder_config=0):
+    X=one_D_position_operator(Nx)
+    H=real_space_floquet_topological_hamiltonian(Nx, t, mu, Delta, km, B, Vm, theta,disorder=disorder,disorder_config=disorder_config)
+    
+    k=10**(-4)
+    
+    L=np.zeros((8*Nx,8*Nx),dtype=complex)
+    
+    L[:4*Nx,4*Nx:]=k*(X-x*np.identity(4*Nx))-1j*(H-E*np.identity(4*Nx))
+    L[4*Nx:,:4*Nx]=k*(X-x*np.identity(4*Nx))+1j*(H-E*np.identity(4*Nx))
+   
+    return L
+    
+
+
+def topological_hamiltonian_localiser_gap(x,E,Nx,t,mu,Delta,km,B,Vm,theta,disorder=0,disorder_config=0):
+    L=dok_matrix(topological_hamiltonian_spectral_localiser(x, E, Nx, t, mu, Delta, km, B, Vm, theta,disorder=disorder,disorder_config=disorder_config)).tocsc()
+    
+    #eigenvalues=np.linalg.eigvalsh(L.A)
+    eigenvalues=spl.eigsh(L,k=1,sigma=0,return_eigenvectors=False,which="LM")
+    
+    gap=np.min(abs(eigenvalues))
+    
+    return gap
+
+def topological_hamiltonian_class_D_invariant(x,Nx,t,mu,Delta,km,B,Vm,theta,disorder=0,disorder_config=0):
+    X=one_D_position_operator(Nx)
+    H=real_space_floquet_topological_hamiltonian(Nx, t, mu, Delta, km, B, Vm, theta,disorder=disorder,disorder_config=disorder_config)
+    
+    k=10**(-4)
+    
+    C=k*(X-x*np.identity(4*Nx))+1j*H
+    
+    invariant,det=np.linalg.slogdet(C)
+    
+    return np.real(invariant)
